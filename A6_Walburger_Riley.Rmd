@@ -1,0 +1,239 @@
+---
+title: "A6_Walburger_Riley"
+author: "Riley Walburger"
+date: "2024-11-19"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+  pdf_document:
+    toc: true
+    toc_depth: 3
+---
+
+## 1 Load packages, prepare and inspect the data
+
+### A) Load Libraries, Import Data and Transform Data
+
+#### Import Libraries
+
+```{r setup, echo=TRUE, results='hide', include=TRUE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(psych)
+library(RWeka) 
+library(dplyr)
+library(purrr)
+library(readr)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(C50) #clafication Tree Library
+library(rminer)
+library(rmarkdown)
+library(tictoc)
+library(e1071) #Naive Baise
+library(matrixStats)
+library(kernlab)
+library(arules)
+```
+
+#### Data Load
+
+```{r echo= TRUE, include=TRUE, message=FALSE, warning=FALSE}
+
+Walmart_visits_7trips <- read.csv("C:/Users/walbr/Desktop/U of U/1- Fall Semester 2024/Data Mining/Assignment 6 - Clustering and Association Mining/Walmart_visits_7trips.csv")
+
+head(Walmart_visits_7trips)
+```
+
+#### Factor Variables and Show Summary
+
+```{r summary of data}
+Walmart_7_factor <- Walmart_visits_7trips %>%
+  mutate( TripType = factor(TripType),
+          DOW = factor(DOW)
+  )
+
+
+summary(Walmart_7_factor)
+```
+
+### B) Pairs Panel
+
+```{r pairs Panel}
+# Subset the data for numeric columns only
+numeric_data <- Walmart_visits_7trips %>%
+  select(UniqueItems, TotalQty, RtrnQty, NetQty, UniqDepts, OneItemDepts, RtrnDepts)
+
+# Create a pairs plot
+pairs.panels(
+  numeric_data,
+  method = "pearson",   # Correlation method
+  hist.col = "#00BFC4", # Histogram color
+  density = TRUE,       # Add density plots
+  ellipses = TRUE,      # Add correlation ellipses
+  lm = TRUE             # Add linear regression lines
+)
+```
+
+
+### C) C5.0 Decision Tree and Confusion Matrix
+
+```{r Decision Tree,fig.height=8, fig.width=20}
+
+# Build the C5.0 tree
+c5_model <- C5.0(formula = TripType ~ ., data = Walmart_7_factor, control = C5.0Control(CF = 0.25))
+
+# Print summary to view tree rules and confusion matrix
+summary(c5_model)
+
+plot(c5_model)
+```
+
+```{r Confusion Matrix for Tree}
+predictions <- predict(c5_model, Walmart_7_factor %>% select(-TripType))
+
+# Create a confusion matrix
+confusion_mat <- confusionMatrix(predictions, Walmart_7_factor$TripType)
+confusion_table <- as.data.frame(confusion_mat$table)
+
+# Plot the confusion matrix as a heatmap
+ggplot(data = confusion_table, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "lightblue", high = "blue") +
+  geom_text(aes(label = Freq), color = "white", size = 4) +
+  labs(
+    title = "Confusion Matrix Heatmap",
+    x = "Predicted Label",
+    y = "Actual Label",
+    fill = "Frequency"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold")
+  )
+```
+```{r Accuracy}
+accuracy <- confusion_mat$overall["Accuracy"]
+cat("Model Accuracy:", accuracy, "\n")
+```
+
+## 2) Use SimpleKMeans clustering  to understand visits
+
+### A) Number of TripTypes and input data
+
+```{r Trip Types}
+TripType_Levels <- length(unique(Walmart_7_factor$TripType))
+inputdata <- select(Walmart_7_factor, -TripType)
+```
+
+### B) Generate Clusters
+```{r Clusters}
+# Perform k-means clustering with the number of clusters equal to TripType_Levels
+set.seed(123)  # Setting a seed for reproducibility
+kmeans <- SimpleKMeans(inputdata, Weka_control(N=TripType_Levels))
+
+kmeans
+```
+
+### C) Change model to use Kmeans++
+
+```{r PlusPlus}
+set.seed(123)  # Setting a seed for reproducibility
+kmeansplus <- SimpleKMeans(inputdata, Weka_control(N=TripType_Levels, init = 1, V=TRUE))
+
+kmeansplus
+```
+
+### D) Use the ManhattanDistance Function
+
+```{r Manhattan}
+set.seed(123)  # Setting a seed for reproducibility
+kmeansMan <- SimpleKMeans(inputdata, Weka_control(N=TripType_Levels,init = 1, A= "weka.core.ManhattanDistance"))
+
+
+kmeansMan
+```
+### E) Decrease the number of clusters
+
+```{r Less Clusters}
+set.seed(123)  # Setting a seed for reproducibility
+kmeansClus <- SimpleKMeans(inputdata, Weka_control(N= 3,init = 1, A= "weka.core.ManhattanDistance"))
+
+
+kmeansClus
+```
+
+## 3 Market Basket Analysis
+
+### A) Import Data
+
+```{r More Data}
+Dept_baskets <- read.transactions("Walmart_baskets_1week.csv", format="single", sep = ",", header = TRUE, cols=c("VisitNumber","DepartmentDescription"))
+
+
+```
+
+### B) Inspect first 15 Transactions
+
+```{r Inspect Transactions}
+inspect(Dept_baskets[0:5])
+```
+
+### C) Item Frequency Plot
+
+```{r Frequency Plot}
+Dept_summary <- summary(Dept_baskets)
+
+itemFrequencyPlot(Dept_baskets,topN = 15)
+```
+
+### D) Associate Rule Mining
+
+####  86 Rules
+
+```{r Less Rules by Lift}
+rules <- apriori(Dept_baskets,parameter = list(support = 0.05, confidence = 0.05, minlen = 2))
+
+#print(rules)
+
+inspect(sort(rules, by = "lift"))
+```
+####  156 Rules
+
+```{r More Rules by Lift}
+rules <- apriori(Dept_baskets,parameter = list(support = 0.04, confidence = 0.05, minlen = 2))
+
+#print(rules)
+
+inspect(sort(rules, by = "lift"))
+```
+## Reflections
+
+The minimum support level I chose was 0.04 and the higher being 0.05. This aloud for 156 rules and 86 rules respectively to happen when paired with a minimum confidence rating of 0.05. 
+
+the rule with the highest lift based on these was 5.47. This was showing that if someone was buying products from DAIRY, DSD GROCERY and PRODUCE they would most likely also be buying COMM BREAD with a confidence of .574. Another rule with much higher confidence would be that of COMM BREAD, DSD GROCERY, PRODUCE leading to DAIRY. This rule had a confidence of 0.871.
+The rule with the highest support was DAIRY, GROCERY DRY GOODS leading to COMM BREAD. With a support of 0.056. 
+Out of these three I would recommend to use second rule mentioned because of the high level of confidence with actually quite similar lift overall and similar support. 
+
+I have learned that clustering is an art. It almost needs to be massaged into things that can help us. The clusters are often good for either a business rule or else if we are already looking for specific clusters of people and to see what we can use to describe them. 
+In this case we have discovered a lot about the types of Walmart trips There are different kind of shoppers often on Friday and Sundays. Some with many items and others with few. We could also look closer and possibly name these sector of shopping trips and how to use them as a Walmart employee.
+
+
+Note to manager:
+
+The results of the models indicate significant patterns in shopping behaviors and associations between product categories. For example, the rule with the highest lift (5.47) suggests that customers purchasing from the Dairy, DSD Grocery, and Produce categories are very likely to also purchase Commercial Bread, with a confidence level of 57.4%. This highlights an opportunity for cross-promotional strategies between these categories. Similarly, a rule with even higher confidence (87.1%) suggests that purchases involving Commercial Bread, DSD Grocery, and Produce strongly predict additional purchases from the Dairy category, underscoring the centrality of Dairy products in these shopping trips.
+
+The rule with the highest support (0.056) further demonstrates that the combination of Dairy and Grocery Dry Goods is a frequent precursor to the purchase of Commercial Bread. This rule emphasizes the widespread occurrence of this buying pattern across transactions.
+
+From these findings, I recommend focusing on the second rule due to its high confidence. This rule provides actionable insights for targeted promotions or strategic placement of Dairy products near bread and grocery items to enhance sales.
+
+On clustering, the analysis revealed distinct shopper segments, especially on high-traffic days like Fridays and Sundays. These segments differ not only in the volume of items purchased but also in the types of products chosen. For example, some clusters may represent bulk buyers completing weekly shopping trips, while others may represent quick, smaller purchases. Naming these clusters (e.g., "Weekly Stock-Up Shoppers" vs. "Quick Essentials Shoppers") could help Walmart employees better understand customer behavior and cater to their needs, potentially by adjusting store layouts or customizing marketing efforts for each group.
+
+Overall, these results highlight the value of clustering and association rule mining in uncovering meaningful patterns in customer behavior. They provide a foundation for improving the customer shopping experience and optimizing sales strategies.
